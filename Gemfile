@@ -7,3 +7,4 @@ gem "faraday"
 group :test, :development do
   gem "rubocop-github"
 end
+https://www.twitch.tv/videos/2388806069
