@@ -1,1 +1,450 @@
-http://localhost:9898/Local/Archive/9wzdncrfj4mv%20(Joshua%20Osburn's%20conflicted%20copy).dat?F3EF3134-142E-4FE4-9B01-2513C1D37EA0
+http://localhost:9898/Local/Archive/9wzdncrfj4mv%20(Joshua%20Osburn's%20conflicted%20copy).dat?F3EF3134-142E-4FE4-9B01-2513C1D37EA0 Fractured Backbone:
+Breaking Modern OS Defenses with Firmware Attacks
+ Yuriy Bulygin Mikhail Gorobets Andrew Furtak Alex Bazhaniuk
+
+Agenda
+Intro to (U)EFI Firmware Threats Windows 10 Virtualization Based Security Attacking Windows 10 VBS
+Bypassing Credential Guard
+Mitigations
+Conclusions
+         
+Intro to (U)EFI Firmware Threats
+   
+Vault 7 Mac EFI Implants
+Vault 7 disclosure included Mac EFI implants
+Dark Matter is an EFI-persistent implant used by Der Starke
+1.x and 2.0 and DarkSeaSkies implant systems
+ Contains multiple EFI components and able to infect EFI
+firmware when it’s either unlocked or locked
+ Includes modules re-infecting EFI update capsules
+Sonic Screwdriver exploits Option ROM in Thunderbolt-to- Ethernet adapter to boot [Der Starke] off of removable media
+      
+Dark Matter EFI Implant
+Loader infects and cleans up, preps for kernel/user implants AppInstaller launches S3Sleep with S3 exploit if flash is locked or
+VerboseInstaller if flash is unlocked
+VerboseInstaller writes PeiLoader and DxeInjector on unlocked flash S3Sleep DXE module launches exploit on S3 sleep & writes PeiUnlock PeiUnlock PEIM keeps flash unlocked by patching HOB to DXE PeiLoader PEIM hooks firmware update PEIM
+DxeInjector DXE module re-injects implants to EFI update capsule
+          
+DarkDream Exploit
+S3Sleep contains DarkDream exploiting EFI protections on resume from S3 sleep
+Using S3 resume in the exploit suggests exploitation of one of S3 boot script vulns
+Technical Details of the S3 Resume Boot Script Vulnerabilities Attacks On UEFI Security by Rafal Wojtczuk and Corey Kallenberg Reversing Prince Harming’s kiss of death by Pedro Vilaca Exploiting UEFI boot script vulnerability by Dmytro Oleksiuk
+Exploit name is probably a coincidence, has nothing to do with sleep ;)
+           
+Mac EFI exploit via S3 boot script (2015)
+  Technical Details of the S3 Resume Boot Script Vulnerabilities
+   
+Detecting Implants?
+Cannot fully rely on built-in platform security mechanisms (e.g. Secure Boot or TPM reporting) as these usually bypassed
+No software that checks for implants in firmware
+Using hardware tools is not scalable and hardware tools may run unsigned firmware...
+We don’t have hashes of firmware executables from platform manufacturers
+       
+    
+Checking the EFI firmware...
+So we had to build a “whitelist” of known EFI executables
+https://github.com/advanced-threat-research/efi-whitelist
+9 platform manufacturers
+~14,000 firmware update images
+Over 2M hashes of EFI executables (PEI + DXE)
+New CHIPSEC module tools.uefi.whitelist which you can use to test EFI firmware against this global EFI whitelist or even generate your own whitelist
+           
+Detecting implants with the whitelist
+  Extra EFI executables belong to HackingTeam’s UEFI rootkit
+   
+Windows 10 Virtualization Based Security
+   
+Once the world was simple...
+     Normal User
+-
+Mode Apps
+  Windows Kernel
+Windows OS
+   UEFI Firmware (BIOS)
+    Hardware (Processor,
+SoC
+)
+   
+Then came Windows 10...
+    
+And then it got complicated...
+UEFI System Firmware
+       Isolated User Trustlets
+-
+Mode (IUM)
+   Normal User
+-
+Mode Apps
+     Secure Kernel
+Secure VM
+NTOS Kernel
+Normal VM
+      Hyper
+-
+V Hypervisor with VBS
+     Hardware (SLAT/EPT and IOMMU/VT
+-
+d)
+   
+Secure VM runs Trustlets in IUM
+UEFI System Firmware
+          LSAISO
+VTPM
+HVCI
+    ...
+Normal User
+-
+Mode Apps
+    Secure Kernel
+Secure VM: VTL1
+NTOS Kernel
+Normal VM: VTL0
+      Hyper
+-
+V Hypervisor with VBS (VTL0 & VTL1 EPT)
+     Hardware (SLAT/EPT and IOMMU/VT
+-
+d)
+   
+Trust Model
+May seem like a traditional hypervisor based trust model Secure VM is isolated from Normal VM by the hypervisor Secure VM trusts hypervisor, underlying hardware & firmware Game over if hypervisor or firmware is compromised
+Nothing unusual...
+       
+Except...
+       Isolated User Trustlets
+-
+Mode (IUM)
+   Normal User
+-
+Mode Apps
+     Secure Kernel
+Secure VM: VTL1
+NTOS Kernel
+Root Partition: VTL0
+       Hyper
+-
+V Hypervisor
+  UEFI System Firmware
+   Hardware (SLAT/EPT and IOMMU/VT
+-
+d)
+   
+VTL0 has full access to firmware
+       Isolated User Trustlets
+-
+Mode (IUM)
+   Normal User
+-
+Mode Apps
+     Secure Kernel
+Secure VM: VTL1
+NTOS Kernel
+Root Partition: VTL0
+        Hyper
+-
+V Hypervisor
+  UEFI System Firmware
+   Hardware (SLAT/EPT and IOMMU/VT
+-
+d)
+   
+So what?
+A single vulnerability in that firmware can bypass Virtualization Based Security protections altogether
+And that vulnerability is exploitable from within normal Windows 10 VM
+   
+Let’s examine hardware protections Virtualization Based Security relies on...
+   
+ DMA
+IOMMU Engines GPU VT-d
+0xFED90000
+Default VT-d
+0xFED91000
+     
+VBS Protects I/OMMU MMIO
+VT-d MMIO ranges are read-only in VTL0 EPT
+     
+Other Memory-Mapped I/O
+All of the other MMIO ranges are R/W and 1:1 mapped in VTL0 EPT
+Windows 10 normal world can write to MMIO (except VT-d)
+Addresses to VT-d MMIO ranges (BARs) are in MCH MMIO range. What if firmware forgot to lock them down?
+Here be dragons
+      
+PCIe Configuration
+PCIe config I/O ports (CF8/CFC) are intercepted
+but aren’t blocked or filtered by Hyper-V
+Memory-mapped Extended Config Access Mechanism (MMCFG) is read-writeable by normal world
+All PCIe configuration access is open
+      
+Attacking Windows 10 Virtualization Based Security
+   
+So we need to find some firmware vuln exploitable from within VTL0
+We decided to use S3 exploit, just like Vault7 Dark Matter Mac EFI implant
+   
+    
+EFI boot script is mapped as R/W in Win10
+       
+We know how to exploit it
+    
+Attack Outline
+S3 boot script payload at this point could directly modify Hyper-V and Secure World VM (Secure Kernel + IUM)
+Instead, the exploit finds VTL0 VMCS and EPT, and adds entries mapping all VTL1 pages to Windows 10
+After exploit, Normal VM has full access to Secure VM memory
+Malware can then extract NTLM credentials or patch Secure Kernel or any trustlet directly from within Windows 10
+       
+Recovering VBS memory map...
+In order to understand how VBS partitions memory, we need to reconstruct SLAT/EPT hierarchy
+Top to bottom approach: find VTL0 & VTL1 VMCS and EPT pointers Bottom to top approach: search pages with EPT entries then
+reconstruct entire hierarchy (PTE  PT  PD  ...  EPTP)
+ Heuristic based on address bits & known reserved bits in EPT entries
+ Then find VMCS for Secure & Normal VMs to validate EPT pointers
+This allows us to recover all EPTs including the ones not currently in use by the CPU/VMM
+         
+Hunting for Secure Kernel...
+ SecureKernel.exe
+loaded at host physical address X in Secure VM
+ Firmware exploit maps
+X256GB + X
+guest physical address in Windows 10
+   
+SecureKernel.exe is XWR in Secure VM
+     
+We can now modify Secure Kernel
+      
+Well OK
+but systems started protecting EFI boot script
+So we are good now...
+   
+    
+Let’s check firmware update images...
+We downloaded and parsed over 14000 UEFI firmware update images by 9 platform vendors. Example results:
+MSI: 1461 firmware updates corresponding to ~98 models Gigabyte: 1117 updates corresponding to ~247 models
+Have no protection of firmware in ROM and no signed updates
+ All these systems are missing basic firmware protections
+      
+    
+Other Vectors
+   
+    
+(Ab)Using SMM...
+VBS lets VTL0 access I/O port 0xB2 and I/O Trap ports Normal world can send software and I/O Trap SMI interrupts
+and exploit vulnerabilities in SMI handlers to attack VBS
+On systems with relocatable SMM communication buffer
+VTL0 can just ask SMM to read/write any address which belongs to Hyper-V or Secure VM
+       
+SMM confused deputy exploit against VBS
+Physical Memory (HPA)
+SMI Handlers
+Hyper-V or VTL1 Memory
+Fake SMM comm buffer
+  Normal World (Root Partition)
+ EDKII
+Via ACPI table
+“UEFI” ACPI
+ SMM Comm Buffer Ptr
+        EDKI
+Directly in registers
+RBX (pointer)
+RAX (code)
+    
+    
+(Ab)Using SMI Handler with BAR issues...
+ PCIe Config is open to VTL0
+Exploit can “relocate” MMIO range to VTL0 by writing to BAR PCIe registers
+Physical Memory (HPA)
+SMI Handler with BAR issue
+Hyper-V or VTL1 Memory
+Fake MMIO range (registers)
+    Trick SMI handlers read/write “registers” in fake MMIO
+VTL1 read/write primitive
+Device PCI CFG
+Base Address (BAR)
+SMI
+            
+ACPI Waking Vector
+Discovered by Rafal Wojtczuk (paper)
+Memory with ACPI tables is writeable by VTL0
+Hyper-V writes OS waking vector to FACS ACPI table before S3 sleep
+Firmware cached pointer to ACPI tables in ACPI NVS which could be modified by VTL0
+VTL0 could force firmware to resume from fake OS Waking Vector prior to Hyper-V
+         
+UEFI Variables
+VTL0 has access to UEFI variables
+Some firmware stores addresses in UEFI variables it may use on S3 resume or at runtime in SMM
+VTL0 can modify these variables to point to VTL1 pages and trick firmware/SMM corrupt VTL1
+Rafal also described a potential attack extracting encryption key from VsmLocalKey2 UEFI variable, decrypting hibernation file and patching Hyper-V (when no TPM available)
+       
+    
+What can we do next?
+Bypass Device Guard and Kernel Code Integrity (HVCI) and modify Windows 10 kernel
+Install hypervisor rootkit/backdoor in Hyper-V Allow compromised or rogue devices do DMA Backdoor software vTPM (on Windows servers)
+Let’s get back to the real world
+Bypass Credential Guard & get protected NTLM credentials
+        
+Bypassing Credential Guard And Recovering Credentials
+   
+First, we found NT hash in memory
+NT hash at HPA 0x1BFF90
+ 0x1BFF90 is mapped to VTL1 EPT (Secure VM) only
+No access from VTL0
+     
+Then we found all candidate NT hashes
+Search VMCS & EPT of VTL1 (Secure VM) & VTL0 (Win 10) Subtract VTL0 from VTL1 view to get Secure VM pages
+ ~50MB memory mapped to VTL1 but not in VTL0
+Search high-entropy 16 bytes surrounded by fixed bytes
+ ~60candidateNThashes
+ Can also match NT with NTLMv2 candidate hashes
+ “net use” to access domain resource & force hashes to memory
+Brute-force login to shared resource with all candidates
+ For example, using smbclient.py by CORE Security
+        
+    
+Trying candidate NT hashes...
+    
+Bingo!
+    
+But can we do a better exploit?
+Online credential brute-forcing domain on-line resource may hit login attempts limit or may trigger an alarm
+Can we extract credentials off-line on a machine? Or even get the key and decrypt all credentials?
+In the meantime patch the LsaIso trustlet to have a persistent implant in Secure VM...
+       
+Checking with Mimikatz...
+    
+Debugging LsaIso Trustlet...
+Trustlets can be debugged the same way as user mode applications A policy embedded in trustlet image defines if debugging is enabled
+Function SkpsIsProcessDebuggingEnabled in Secure Kernel verifies if the debugging is enabled for a given trustlet process
+We can find and patch it to always return “Debugging Enabled” We could then attach a debugger running in VTL0 to trustlet
+(LsaIso) in VTL1 and “debug” it
+For example, break on LsaIso!IumUnprotectCredentials
+         
+Patching secure kernel to enable debug
+ SecureKernel.exe
+.text:00000001400358B0  ; bool __fastcall SkpsIsProcessDebuggingEnabled(unsigned int *a1)
+ .text:00000001400358B0 SkpsIsProcessDebuggingEnabled proc near ; CODE ...
+.text:000000014003597A 48 8B CE
+.text:000000014003597D E8 32 42
+.text:0000000140035982 8A C3 B0
+.text:0000000140035984 48 8B 4C 24 58
+.text:0000000140035989 48 33 CC
+.text:000000014003598C E8 5F A4 01 00
+.text:0000000140035991 4C 8D 5C 24 60
+.text:0000000140035996 49 8B 5B 18
+.text:000000014003599A 49 8B 73 20
+.text:000000014003599E 49 8B E3
+.text:00000001400359A1 5F
+.text:00000001400359A2 C3 retn .text:00000001400359A2 SkpsIsProcessDebuggingEnabled endp
+XREF: sub_14003D76C+368p
+rcx, rsi SkiAttachProcess
+al, bl 01h
+rcx, [rsp+68h+var_10] rcx, rsp sub_14004FDF0
+r11, [rsp+68h+var_8] rbx, [r11+18h]
+rsi, [r11+20h]
+rsp, r11
+rdi
+FD FF
+01
+mov call mov mov xor call lea mov mov mov pop
+   
+ Lsaiso!IumpUnprotectCredential
+     
+Demo:
+Debugging LsaIso Trustlet from VTL0
+   
+    
+OK, we can now debug IUM Trustlets...
+How can we recover the credentials?
+We need to understand how credentials are encrypted.
+   
+LsaIso Encrypted Credential Blob
+Blob with encrypted data (LSA Isolated Data)
+0000 0010 0020 0030 0040 0050 0060 0070 0080 0090
+A0000000000000000800000064000000 010000000101000000000000
+ 0000 0010 0020 0030
+0B72B560686BD245E7EC681919C50222 NTLM(password)
+96 DD 17 86 FF 47 5C CE 9C 76 AF 59
+34 00 00 00
+4E 74 6C 6D 48 61 73 68
+8C 58 27 EF
+ BA 19 79 E7 E3 E7 4F 1F 84 50 68 9C 39 D7 DC AD
+ DC BC E8 B9
+  3F 06 06 2D E8 D7 09 73 98 B1 70 F0
+01 00 00 00
+  00 00 00 00 00 00 00 00 00 00 00 00 01 80 00 00
+9D EC 2D CB
+string
+Encrypted Data
+   4F 90 C8 BF BB AB 35 A1 44 60 58 0C 51 60 0A 03
+ 57 6E E2 23 1E 16 37 4E 13 05 C9 60 CD 3C 9C 07
+  Decrypted data
+E0 CE 06 74 36 9E 84 81 94 AD FC C2 23 52 76 5A
+KDF Context
+ Authentication Tag
+ Authenticated Data
+    00000000000000000000000000000000
+C3 DD 01 1D 47 D2 37 04 5B 5F 30 EA 03 BE 47 58
+HtlmHash
+ SHA1(password)
+  C4 28 84 E2
+    
+Encryption Key
+Encryption key is derived from Boot Key generated every time system starts
+    
+Encryption Key Derivation
+Key Derivation Function: SP800-108
+HMAC-SHA256 as PRF Counter mode
+master key
+    KDF Contexts
+          LsaIso
+LsaIso
+LsaIso
+NTLM Password1 Password2
+key key key
+   
+Encryption Key Derivation
+    
+Credentials Encryption
+• Authenticated encryption with AES GCM
+• Nonce and IV are both 12 zero bytes
+    
+Credentials Decryption
+If key is correct, computed tag must match Authentication Tag in the LSA Isolated Data blob
+Algorithm: AES256-GCM Encrypted Data
+LsaIso key
+Decrypted Data + Authentication Tag ? Authentication Tag in LSA Blob
+       
+Low Tech Encryption Key Recovery
+Just like when searching for NT hashes...
+Subtract VTL0 from VTL1 page hierarchy to get pages mapped only to Secure VM
+Search for high-entropy sequences  Yields~50,000candidateskeys
+Brute-force all candidates until Authentication Tags match
+       
+Demo
+    
+    
+Mitigations
+   
+Windows SMM Mitigations ACPI Table
+    
+Mitigations
+UEFI is reporting mitigations to Windows 10 via the new ACPI Table: Windows SMM Mitigations Table (WSMT)
+FIXED_COMM_BUFFERS: EDK2 based firmware started using fixed memory locations to communicated with SMM
+COMM_BUFFERS_NESTED_PTR_PROTECTION: firmware checks that pointers within CommBuffer also point to fixed memory locations
+SYSTEM_RESOURCE_PROTECTION: After ExitBootService(), firmware doesn’t allow changing IOMMU, PCI config space, FACS
+Firmware started protecting S3 Boot Script using SMM memory. No “S3 boot script protection” bit?
+         
+Conclusions
+Plenty of vulnerable systems out there (including newest) yet firmware is a blind spot for most businesses
+Exploiting firmware on both PCs and Macs is rather easy. Weaponized exploits and implants are out there
+VBS allows Windows 10 VM access almost all firmware. One vulnerability in firmware may lead to complete compromise of all VBS based protections and the Secure World VM
+      
+References
+1. Attacking Hypervisors with Hardware and Firmware, BHUSA 2015
+2. Analysis of the Attack Surface of Windows 10 Virtualization-Based
+Security by Rafal Wojtczuk, BHUSA 2016
+3. Defeating Pass-the-Hash by Baris Saydag & Seth Moore, BHUSA
+2015
+4. Dropping the Hammer on Malware Threats with Windows 10 Device
+Guard by Scott Anderson & Jeffrey Sutherland
+5. Battle of SKM and IUM by Alex Ionescu, BHUSA 2015
+         
+ Thank You!
+Special thanks to John Loucaides from Intel
