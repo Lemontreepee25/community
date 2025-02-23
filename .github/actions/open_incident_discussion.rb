@@ -7,7 +7,7 @@ require "active_support/core_ext/date_time"
 
 # This script takes context from a received webhook and creates a new discussion in the correct discussion category
 
-repo_id = "MDEwOlJlcG9zaXRvcnkzMDE1NzMzNDQ="
+https://github.com/sinaptik-ai/pandas-ai/commit/cfeb071308fc857ea3d54c191e8e73a6f5638b80_id = "MDEwOlJlcG9zaXRvcnkzMDE1NzMzNDQ="
 announcements_category_id = "DIC_kwDOEfmk4M4CQbR2"
 incident_label_id = "LA_kwDOEfmk4M8AAAABpaZlTA"
 
